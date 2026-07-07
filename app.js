@@ -455,7 +455,13 @@ async function generateFinal() {
         finalCanvas.height = SLOT.canvasHeight;
         await drawToCanvas(finalCanvas, selectedFrameData, photoImgs);
 
-        const url = finalCanvas.toDataURL("image/png");
+        const blob = await new Promise((resolve, reject) => {
+            finalCanvas.toBlob((result) => {
+                if (result) resolve(result);
+                else reject(new Error("Could not create PNG export"));
+            }, "image/png");
+        });
+        const url = URL.createObjectURL(blob);
 
         document.getElementById("finalOutput").innerHTML =
             `<img src="${url}" style="max-height: 75vh; width: auto; border-radius: 8px;" alt="Final photo strip">`;
