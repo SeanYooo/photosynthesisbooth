@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Lock In | Photo Booth</title>
+        <link rel="stylesheet" href="style.css?v=20260708" />
+    </head>
+    <body>
+        <div id="flash"></div>
+
+        <!-- Home Screen -->
+        <div id="home" class="screen active">
+            <div class="logo-container">
+                <img src="assets/booth-logo.png" alt="Lock In logo" />
+            </div>
+            <div class="tagline">Tap to begin</div>
+            <div id="localFileWarning" style="display: none; color: #ffefcc; margin: 12px auto 0; max-width: 480px; font-size: 0.95rem; line-height: 1.4;">
+                Open this app from a local web server such as <strong>python3 -m http.server 8000</strong> for the camera and image export features to work properly.
+            </div>
+            <button onclick="beginSetup()">INITIATE BOOTH</button>
+        </div>
+
+        <!-- Init Screen -->
+        <div id="initScreen" class="screen">
+            <div class="tagline">Initializing Environment...</div>
+            <div id="cameraError" class="error-text" style="display: none"></div>
+        </div>
+
+        <!-- Ready Prompt -->
+        <div id="readyPrompt" class="screen">
+            <div class="logo-container">
+                <img src="assets/booth-logo.png" alt="Lock In logo" />
+            </div>
+            <button onclick="startBooth()">START BOOTH</button>
+        </div>
+
+        <!-- Photo Booth View -->
+        <div id="booth" class="screen">
+            <div class="booth-layout">
+                <div class="video-container">
+                    <video id="video" autoplay playsinline></video>
+                </div>
+                <div class="side-controls">
+                    <div class="status-panel">
+                        <div id="label">READY</div>
+                        <div id="timer">--</div>
+                    </div>
+                    <button id="startBtn">START SESSION</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Photo Selection -->
+        <div id="selectionScreen" class="screen">
+            <div class="logo-container" style="max-width: 200px">
+                <img src="assets/booth-logo.png" alt="Lock In logo" />
+            </div>
+            <div class="tagline">Pick 4 Photos to keep</div>
+            <div id="selectionGrid" class="selection-grid"></div>
+            <button id="confirmPhotosBtn" disabled>LOCK IN PHOTOS (0/4)</button>
+        </div>
+
+        <!-- Processing -->
+        <div id="processingScreen" class="screen">
+            <div class="processing-title">Photosynthesizing...</div>
+            <div class="progress-container">
+                <div id="progressBar" class="progress-bar"></div>
+            </div>
+        </div>
+
+        <!-- Frame Selection -->
+        <div id="frameSelection" class="screen">
+            <div id="frameTimer" class="sequence-timer">60s</div>
+            <div id="frameGrid" class="frame-grid"></div>
+            <button
+                id="finalizeBtn"
+                disabled
+                onclick="generateFinal()"
+                style="margin-top: 30px"
+            >
+                FINALIZE & PRINT
+            </button>
+        </div>
+
+        <!-- Result Screen -->
+        <div id="resultScreen" class="screen">
+            <div class="result-container" id="finalOutput"></div>
+            <div
+                style="
+                    display: flex;
+                    flex-direction: column;
+                    gap: 12px;
+                    width: 100%;
+                    align-items: center;
+                    margin-top: 20px;
+                "
+            >
+                <a
+                    id="downloadLink"
+                    href="#"
+                    download="lock-in-strip.png"
+                    style="
+                        text-decoration: none;
+                        width: 100%;
+                        display: flex;
+                        justify-content: center;
+                    "
+                >
+                    <button type="button" onclick="downloadFinalImage(); return false;">DOWNLOAD STRIP</button>
+                </a>
+                <button class="secondary" onclick="startNewSession()">
+                    NEW SESSION
+                </button>
+            </div>
+        </div>
+
+        <canvas id="canvas"></canvas>
+
+        <script src="app.js?v=20260708"></script>
+    </body>
+</html>
