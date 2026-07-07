@@ -439,32 +439,6 @@ function imageToDataUrl(img) {
     });
 }
 
-function buildFinalStripSvg(frame, photoDataUrls) {
-    const width = SLOT.canvasWidth;
-    const height = SLOT.canvasHeight;
-    const photoWidth = SLOT.photoWidth;
-    const photoHeight = SLOT.photoHeight;
-    const startY = SLOT.startY;
-    const gap = SLOT.gap;
-    const photosMarkup = photoDataUrls
-        .map((photoDataUrl, i) => {
-            if (!photoDataUrl) return "";
-            const y = startY + i * (photoHeight + gap);
-            const x = (width - photoWidth) / 2;
-            return `<image href="${photoDataUrl}" x="${x}" y="${y}" width="${photoWidth}" height="${photoHeight}" preserveAspectRatio="xMidYMid slice" />`;
-        })
-        .join("");
-
-    return `
-        <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
-            <rect x="0" y="0" width="${width}" height="${height}" fill="white" />
-            ${frame?.base ? `<image href="${frame.base}" x="0" y="0" width="${width}" height="${height}" preserveAspectRatio="xMidYMid slice" />` : ""}
-            ${photosMarkup}
-            ${frame?.overlay ? `<image href="${frame.overlay}" x="0" y="0" width="${width}" height="${height}" preserveAspectRatio="xMidYMid slice" />` : ""}
-        </svg>
-    `;
-}
-
 async function generateFinal() {
     if (frameSelectionInterval) clearInterval(frameSelectionInterval);
     const btn = document.getElementById("finalizeBtn");
@@ -476,21 +450,18 @@ async function generateFinal() {
             selectedPhotoIndices.map((i) => loadImage(capturedPhotos[i]))
         );
         const selectedFrameData = selectedFrame || FRAMES[0];
-        const frameAssets = await getFrameAssets(selectedFrameData);
-        const photoDataUrls = await Promise.all(photoImgs.map((img) => imageToDataUrl(img)));
-        const baseDataUrl = frameAssets?.base ? await imageToDataUrl(frameAssets.base) : null;
-        const overlayDataUrl = frameAssets?.overlay ? await imageToDataUrl(frameAssets.overlay) : null;
-        const svgMarkup = buildFinalStripSvg(
-            { base: baseDataUrl, overlay: overlayDataUrl },
-            photoDataUrls
-        );
-        const url = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgMarkup)}`;
+        const finalCanvas = document.createElement("canvas");
+        finalCanvas.width = SLOT.canvasWidth;
+        finalCanvas.height = SLOT.canvasHeight;
+        await drawToCanvas(finalCanvas, selectedFrameData, photoImgs);
+
+        const url = finalCanvas.toDataURL("image/png");
 
         document.getElementById("finalOutput").innerHTML =
             `<img src="${url}" style="max-height: 75vh; width: auto; border-radius: 8px;" alt="Final photo strip">`;
         const downloadLink = document.getElementById("downloadLink");
         downloadLink.href = url;
-        downloadLink.download = "lock-in-strip.svg";
+        downloadLink.download = "lock-in-strip.png";
         showScreen("resultScreen");
     } catch (err) {
         console.error("Final generation failed", err);
