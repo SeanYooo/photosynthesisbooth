@@ -40,9 +40,12 @@ const VIDEO_MIME = MediaRecorder.isTypeSupported('video/mp4;codecs=avc1.42E01E')
     ? 'video/mp4;codecs=avc1.42E01E'
     : 'video/webm;codecs=vp9';
 
-// Cloudinary config (fallback defaults; can be overridden via window.ENV at build time)
-const CLOUDINARY_CLOUD_NAME = (window.ENV && window.ENV.CLOUDINARY_CLOUD_NAME) || 'bhgpuo3w';
-const CLOUDINARY_UPLOAD_PRESET = (window.ENV && window.ENV.CLOUDINARY_UPLOAD_PRESET) || 'photosynthesisbooth';
+// Cloudinary config (fallback defaults; overridden by config.js if present)
+// These are defined as constants but the actual values used at runtime come from
+// window.CLOUDINARY_CLOUD_NAME / window.CLOUDINARY_UPLOAD_PRESET (set by config.js)
+// with fallback to these defaults for GitHub Pages
+const CLOUDINARY_CLOUD_NAME = 'bhgpuo3w';
+const CLOUDINARY_UPLOAD_PRESET = 'photosynthesisbooth';
 
 const FRAME_ASSET_DIR = "frames/";
 const FRAME_THUMB_DIR = "frames/thumbs/";
