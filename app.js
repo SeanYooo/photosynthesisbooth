@@ -734,13 +734,14 @@ function loadVideo(blob) {
  * FIXES:
  * 1. No more flicker: Uses 4 persistent offscreen slot canvases.
  *    Each slot canvas is initialized ONCE with the static photo, then
- *    only updated when video has a valid frame (readyState >= 2, not seeking, not paused).
+ *    only updated when video has a valid frame (readyState >= 2, not seeking).
  *    This eliminates the jump-cut flash between static and video frames.
  *
  * 2. No more 1.5s freeze: Uses a single master clock (elapsed = (now - startTime) % clipDurationMs)
  *    instead of relying on video.duration (often Infinity for MediaRecorder blobs) or native
  *    video.loop (which drifts and stalls across 4 separate elements).
- *    Pre-buffers all 4 videos and waits for readyState >= 3 (HAVE_ENOUGH_DATA) before starting.
+ *    Pre-buffers all 4 videos, calls await video.play() on each so they decode continuously,
+ *    and resets all 4 to currentTime=0 together once per 4000ms cycle (NOT every frame).
  */
 async function generateReplayStrip(selectedIndices, frame) {
     const canvas = document.createElement('canvas');
@@ -821,7 +822,6 @@ async function generateReplayStrip(selectedIndices, frame) {
     }
 
     // Pre-buffer all 4 videos and wait for readyState >= 3 (HAVE_ENOUGH_DATA)
-    // FIX 2: Don't use video.loop or video.duration - use master clock instead
     await Promise.all(videos.map(async (video, i) => {
         if (!video) return;
         video.muted = true;
@@ -848,10 +848,9 @@ async function generateReplayStrip(selectedIndices, frame) {
             });
         }
 
-        // Prime the decoder by playing briefly then pausing at t=0
+        // Prime the decoder: play briefly, then pause at t=0
         try {
             await video.play();
-            // Give it a moment to decode first frame
             await new Promise(r => setTimeout(r, 50));
             video.pause();
             video.currentTime = 0;
@@ -860,9 +859,19 @@ async function generateReplayStrip(selectedIndices, frame) {
         }
     }));
 
-    // FIX 2: Master clock - 4 second cycle (120 frames at 30fps)
+    // FIX 2: Start all 4 videos playing continuously so they decode frames in real time
+    await Promise.all(videos.map(async (video) => {
+        if (!video) return;
+        try {
+            await video.play();
+        } catch (e) {
+            console.warn('Video play failed:', e);
+        }
+    }));
+
+    // Master clock - 4 second cycle (120 frames at 30fps)
     const CLIP_DURATION_MS = REPLAY_DURATION_SECONDS * 1000; // 4000ms
-    const startTime = performance.now();
+    let lastLoopBoundary = 0;
 
     recorder.start();
 
@@ -870,7 +879,14 @@ async function generateReplayStrip(selectedIndices, frame) {
     for (let frameIdx = 0; frameIdx < REPLAY_TOTAL_FRAMES; frameIdx++) {
         // Master clock: elapsed time within the 4-second cycle
         const elapsedMs = (performance.now() - startTime) % CLIP_DURATION_MS;
-        const t = elapsedMs / 1000; // time in seconds within [0, 4)
+
+        // Once per cycle (~4000ms), reset all 4 videos to t=0 TOGETHER
+        // This keeps them synchronized without seeking every frame
+        if (elapsedMs < lastLoopBoundary) {
+            // We crossed the 4-second boundary (elapsed wrapped from ~4000 -> ~0)
+            videos.forEach(v => { if (v) v.currentTime = 0; });
+        }
+        lastLoopBoundary = elapsedMs;
 
         // Clear and draw white background
         ctx.fillStyle = 'white';
@@ -887,9 +903,9 @@ async function generateReplayStrip(selectedIndices, frame) {
             const slot = slotPositions[i];
             const slotCanvas = slotCanvases[i];
 
-            // Update slot canvas ONLY when video has a valid frame
-            // readyState >= 2 (HAVE_CURRENT_DATA), not seeking, not paused
-            if (video && video.readyState >= 2 && !video.seeking && !video.paused) {
+            // Update slot canvas when video has a valid frame (readyState >= 2, not seeking)
+            // NOTE: We do NOT check !video.paused because videos are now playing continuously
+            if (video && video.readyState >= 2 && !video.seeking) {
                 const slotCtx = slotCanvas.getContext('2d');
                 // Draw video frame fitted to slot (cover) with mirror fix
                 const vAspect = video.videoWidth / video.videoHeight;
@@ -937,8 +953,7 @@ async function generateReplayStrip(selectedIndices, frame) {
         await new Promise(r => requestAnimationFrame(r));
     }
 
-    // After rendering, explicitly seek all videos to end to ensure MediaRecorder flushes
-    // (captureStream needs the canvas to be "done" to finalize the recording)
+    // After rendering, stop recorder
     recorder.stop();
 
     return new Promise((resolve) => {
