@@ -90,6 +90,7 @@ body::before {
 .logo-container img {
     width: 100%;
     height: auto;
+    aspect-ratio: 3840 / 2160; /* matches intrinsic 3840x2160 — reserves space, no layout shift */
     object-fit: contain;
 }
 
@@ -201,6 +202,7 @@ video {
 }
 
 .photo-choice {
+    aspect-ratio: 4 / 3; /* matches the export slot ratio; object-fit: cover on the img keeps the 16:9 capture undistorted inside it */
     border-radius: 16px;
     overflow: hidden;
     border: 6px solid transparent;
@@ -245,8 +247,25 @@ video {
 
 .photo-choice img {
     width: 100%;
+    height: 100%;
+    object-fit: cover; /* capture is 16:9; export slots are 4:3 — cover fills the 4:3 preview box with no stretch, matching the export crop */
     display: block;
     transform: scaleX(-1);
+}
+
+.frame-card canvas {
+    width: 100%;
+    aspect-ratio: 400 / 1200;
+    height: auto;
+    display: block;
+}
+
+.frame-card img {
+    width: 100%;
+    aspect-ratio: 400 / 1200;
+    height: auto;
+    display: block;
+    object-fit: cover;
 }
 
 .frame-grid {
@@ -323,13 +342,6 @@ video {
     overflow: hidden;
     text-overflow: ellipsis;
     letter-spacing: 0.5px;
-}
-
-.frame-price {
-    font-size: 10px;
-    color: var(--accent);
-    font-weight: 800;
-    opacity: 0.85;
 }
 
 .result-container {

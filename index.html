@@ -5,6 +5,18 @@
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>Lock In | Photo Booth</title>
         <link rel="stylesheet" href="style.css?v=20260708" />
+        <!-- Open Graph / Twitter -->
+        <meta property="og:title" content="Lock In — Photo Booth" />
+        <meta property="og:description" content="Browser-based photo booth. Capture a 6-shot burst, pick 4, choose a frame, and download a printable photo strip." />
+        <meta property="og:type" content="website" />
+        <meta property="og:url" content="https://seanyooo.github.io/photosynthesisbooth/" />
+        <meta property="og:image" content="https://seanyooo.github.io/photosynthesisbooth/og-image.png" />
+        <meta property="og:image:width" content="1200" />
+        <meta property="og:image:height" content="630" />
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content="Lock In — Photo Booth" />
+        <meta name="twitter:description" content="Browser-based photo booth. Capture a 6-shot burst, pick 4, choose a frame, and download a printable photo strip." />
+        <meta name="twitter:image" content="https://seanyooo.github.io/photosynthesisbooth/og-image.png" />
     </head>
     <body>
         <div id="flash"></div>
@@ -12,7 +24,7 @@
         <!-- Home Screen -->
         <div id="home" class="screen active">
             <div class="logo-container">
-                <img src="assets/booth-logo.png" alt="Lock In logo" />
+                <img src="assets/booth-logo.png" alt="Lock In logo" width="3840" height="2160" loading="eager" decoding="async" fetchpriority="high" />
             </div>
             <div class="tagline">Tap to begin</div>
             <div id="localFileWarning" style="display: none; color: #ffefcc; margin: 12px auto 0; max-width: 480px; font-size: 0.95rem; line-height: 1.4;">
@@ -30,7 +42,7 @@
         <!-- Ready Prompt -->
         <div id="readyPrompt" class="screen">
             <div class="logo-container">
-                <img src="assets/booth-logo.png" alt="Lock In logo" />
+                <img src="assets/booth-logo.png" alt="Lock In logo" width="3840" height="2160" loading="lazy" decoding="async" />
             </div>
             <button onclick="startBooth()">START BOOTH</button>
         </div>
@@ -54,7 +66,7 @@
         <!-- Photo Selection -->
         <div id="selectionScreen" class="screen">
             <div class="logo-container" style="max-width: 200px">
-                <img src="assets/booth-logo.png" alt="Lock In logo" />
+                <img src="assets/booth-logo.png" alt="Lock In logo" width="3840" height="2160" loading="lazy" decoding="async" />
             </div>
             <div class="tagline">Pick 4 Photos to keep</div>
             <div id="selectionGrid" class="selection-grid"></div>

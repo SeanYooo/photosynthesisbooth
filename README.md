@@ -1,16 +1,45 @@
 # Lock In — Photo Booth
 
-A browser-based photo booth: capture a 6-shot burst from your webcam, pick your favorite 4, choose a frame, and download a printable photo strip. No backend — everything runs client-side with `getUserMedia` and `<canvas>` compositing.
+A browser-based photo booth that turns a webcam burst into a printable photo strip. No backend — everything runs in the browser with `getUserMedia` and `<canvas>`.
 
-<!-- Add a screenshot or short GIF of the app here before publishing -->
+**Live demo:** https://seanyooo.github.io/photosynthesisbooth/
+
+<!-- Screenshot or short GIF of the app — drop a file at docs/screenshot.png and replace this line with ![Screenshot](docs/screenshot.png) -->
+
+## Features
+
+- 6-shot burst with a 3-second countdown and flash between shots
+- Pick 4 of 6 photos to keep
+- 30 frame designs with live preview thumbnails
+- Download the final strip as a full-resolution PNG (1600×4800)
+- No uploads, no server — photos never leave the browser
 
 ## How it works
 
-1. **Start** — tap "Initiate Booth". Frame images load automatically from `/frames/` and the browser asks for camera permission — no file upload.
-2. **Capture** — a 6-photo burst with a 3-second countdown and flash between each shot.
-3. **Select** — pick 4 of the 6 photos to keep.
-4. **Choose a frame** — preview thumbnails are generated live for every frame in `app.js`.
-5. **Download** — the final strip is composited on a `<canvas>` and offered as a PNG download.
+1. **Start** — tap *INITIATE BOOTH*. The browser asks for camera permission.
+2. **Capture** — a 6-photo burst with a countdown and flash.
+3. **Select** — pick 4 of the 6 photos.
+4. **Choose a frame** — preview thumbnails load only at this step; the full-size frame downloads only for the one you pick.
+5. **Download** — the final strip is composited on a `<canvas>` and offered as a PNG.
+
+## Running locally
+
+This is a static site — no build step. Clone the repo (with the `frames/` folder included) and serve it with any static file server, e.g.:
+
+```bash
+npx serve .
+# or
+python3 -m http.server 8000
+```
+
+Camera access requires either `localhost` or HTTPS. It will not work over a plain `http://` connection to a non-localhost address, and opening `index.html` directly from disk is not supported.
+
+## Tech used
+
+- Vanilla JavaScript (`app.js`)
+- `getUserMedia` (webcam capture, with `ImageCapture` fallback to `<canvas>`)
+- `<canvas>` compositing for the strip export
+- Plain HTML and CSS, no framework, no build tooling
 
 ## Project structure
 
@@ -22,58 +51,20 @@ assets/
   booth-logo.png
   bg-pattern.png
 frames/
-  lucky-green-base.png
-  lucky-green-overlay.png
-  midnight-sky-base.png
-  cloud-dancer-base.png
-  ...
+  <slug>-base.png          # full-size frame, 1600×4800
+  <slug>-overlay.png       # optional, drawn on top
+  thumbs/
+    <slug>.webp              # 400×1200 base preview
+    <slug>-overlay.webp     # 400×1200 overlay preview (when present)
 ```
 
-- `assets/` holds static UI images (logo, background) referenced directly in `index.html`/`style.css`.
-- `frames/` holds the frame template PNGs, loaded automatically at startup by `app.js`. This folder must be committed to the repo (or otherwise present on disk) — cloning the project and running a static server is all that's needed to see the frames; no upload step required.
+## Adding a frame
 
-## Adding or renaming a frame
+Frame filenames are derived from the `name` in the `FRAMES` array in `app.js` by `slugify()` — lowercased, non-alphanumeric runs collapsed to hyphens. To add one, add `{ name: "Your Frame" }` to `FRAMES`, drop `frames/your-frame-base.png` (and `-overlay.png` if needed) at 1600×4800, and generate the matching `thumbs/` previews. The overlay is optional; frames without one render with just the base.
 
-Frame filenames are derived from the frame's `name` in the `FRAMES` array in `app.js`, lowercased and with non-alphanumeric characters collapsed to hyphens (see `slugify()`):
+## What I built and learned
 
-| Frame name | Expected files |
-| --- | --- |
-| `"Lucky Green"` | `frames/lucky-green-base.png`, `frames/lucky-green-overlay.png` |
-| `"Midnight Sky"` | `frames/midnight-sky-base.png` |
-| `"Static & Stars"` | `frames/static-stars-base.png`, `frames/static-stars-overlay.png` |
-| `"Saan?"` | `frames/saan-base.png`, `frames/saan-overlay.png` |
-
-To add a new frame:
-
-1. Add `{ name: "Your Frame Name", price: "PHP 40" }` to `FRAMES` in `app.js`.
-2. Drop `frames/your-frame-name-base.png` (and, if needed, `-overlay.png`) into the `frames/` folder.
-3. Reload — no other code changes needed. The overlay file is optional; if it's not present, the frame is rendered with just the base.
-
-If you'd rather keep a filename independent of the display name (e.g. after renaming a frame but not wanting to rename its file), add an explicit `slug` field to that frame's entry: `{ name: "New Name", slug: "old-slug", price: "..." }`.
-
-`base` is drawn first (this is what shows through empty photo slots), photos are composited on top, then `overlay` (if present) is drawn last — useful for frames with borders/text that sit in front of the photos.
-
-Frame templates are expected at 1600×4800px, with photo slots defined in the `SLOT` constant in `app.js`. If you use differently-sized templates you'll need to re-measure those numbers.
-
-## Migrating from the old numbered-file scheme
-
-Earlier versions of this project required manually uploading a folder at runtime, with frames keyed by numeric IDs (`1.png`, `2.png`, ...) mapped to names via `base`/`overlay` fields in `FRAMES`. If you have PNGs in that old format, run the included one-time migration script to rename them:
-
-```bash
-node migrate-frame-assets.js ./assets ./frames
-```
-
-This copies each old numbered file to its new slug-based name in `frames/`. Review the output, then delete the old numbered files. New frames added after migrating don't need this script.
-
-## Running locally
-
-This is a static site — no build step. Clone the repo (with the `frames/` folder included) and serve it with any static file server, e.g.:
-
-```bash
-npx serve .
-```
-
-Camera access requires either `localhost` or HTTPS; it will not work over a plain `http://` connection to a non-localhost address.
+I built this as a small, focused web app with no framework — all the image work happens on HTML canvas elements and the browser's media APIs do the rest. Two issues were worth fixing properly instead of patching around. First, the app was downloading all 54 full-size frame PNGs up front; I moved to small 400×1200 preview thumbs and only fetch the chosen frame at full size. Second, the preview had its layer order wrong — overlay art that overlaps a photo slot was drawn under the photos instead of on top, which I caught by comparing the grid against the final export and fixed in the thumbnail pipeline. I also resized the frame art to exactly the 1600×4800 size the export actually uses and recompressed the PNGs, which cut the frame payload by more than half.
 
 ## Known limitations
 
@@ -81,4 +72,4 @@ Camera access requires either `localhost` or HTTPS; it will not work over a plai
 
 ## License
 
-MIT — see `LICENSE`.
+MIT.
