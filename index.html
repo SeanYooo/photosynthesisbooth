@@ -106,6 +106,23 @@
             <div id="replayStatus" class="tagline" style="margin-top: 20px;">Preparing video...</div>
         </div>
 
+        <!-- Mobile Replay Screen (shown when ?replay= is in URL) -->
+        <div id="replayScreen" class="screen">
+            <div class="logo-container" style="max-width: 280px">
+                <img src="assets/booth-logo.png" alt="Lock In logo" width="3840" height="2160" loading="eager" decoding="async" fetchpriority="high" />
+            </div>
+            <div class="tagline">Your Moving Photobooth Strip</div>
+            <div class="video-wrapper">
+                <video id="replayVideo" playsinline muted loop autoplay controls poster="assets/booth-logo.png" style="width: 100%; height: auto; max-height: 55vh; border-radius: 24px; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25); border: 8px solid white; display: block; margin: 0 auto;"></video>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 12px; width: 100%; align-items: center; margin-top: 20px;">
+                <button id="downloadReplayBtn" type="button">DOWNLOAD VIDEO</button>
+                <a id="replayDirectLink" href="#" download="photosynthesis-booth-replay.mp4" style="display: inline-block; margin-top: 6px; color: var(--muted); font-size: 12px; text-decoration: underline;">Open raw video link</a>
+                <button class="secondary" onclick="goToBooth()">GO TO BOOTH</button>
+            </div>
+            <div id="replayError" style="display: none; margin-top: 16px; color: #b91c1c; background: #fef2f2; border: 1px solid #fecaca; padding: 14px 20px; border-radius: 12px; max-width: 400px; text-align: center;"></div>
+        </div>
+
         <!-- Result Screen -->
         <div id="resultScreen" class="screen">
             <div class="result-container" id="finalOutput"></div>
@@ -120,7 +137,7 @@
             <div id="qrSection" style="display: none; margin-top: 30px; text-align: center;">
                 <div class="tagline">Scan to View & Save on Mobile</div>
                 <canvas id="qrCanvas" width="512" height="512" style="max-width: 100%; border-radius: 16px; box-shadow: 0 15px 35px -10px rgba(0, 0, 0, 0.15);"></canvas>
-                <div class="tagline" style="margin-top: 12px; font-size: 12px;">Opens https://seanyooo.github.io/photosynthesisbooth/</div>
+                <div class="tagline" style="margin-top: 12px; font-size: 12px;">Opens replay page with video</div>
             </div>
 
             <div
@@ -157,6 +174,6 @@
 
         <!-- QR Code Library -->
         <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
-        <script src="app.js?v=20261121b"></script>
+        <script src="app.js?v=20261121c"></script>
     </body>
 </html>

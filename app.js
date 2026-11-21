@@ -107,6 +107,10 @@ let videoStartTime = 0;
 let countdownInterval = null;
 let countdownStartTime = 0;
 
+// Replay state for mobile view
+let replayVideoBlob = null;
+let replayCloudinaryUrl = null;
+
 // Cache of loaded frame images, keyed by slug: slug -> { base, overlay }.
 // Populated once by preloadAllFrames() on startup; getFrameAssets() falls
 // back to loading on-demand if a frame is ever requested before that
@@ -120,6 +124,89 @@ const captureCtx = captureCanvas.getContext("2d");
 
 if (window.location.protocol === "file:") {
     console.warn("Opening index.html directly from disk is not supported for camera-based features.");
+}
+
+/**
+ * Check for ?replay= query parameter on page load and show mobile replay view.
+ * This runs before any other initialization.
+ */
+(function initMobileReplayOnLoad() {
+    const params = new URLSearchParams(window.location.search);
+    const replayUrl = params.get('replay');
+    if (replayUrl) {
+        // Show the dedicated replay screen
+        showScreen('replayScreen');
+        setupMobileReplayView(decodeURIComponent(replayUrl));
+        return;
+    }
+})();
+
+function goToBooth() {
+    // Clear replay parameter and reload to start fresh booth session
+    window.location.href = 'https://seanyooo.github.io/photosynthesisbooth/';
+}
+
+function setupMobileReplayView(videoUrl) {
+    const replayVideo = document.getElementById('replayVideo');
+    const downloadBtn = document.getElementById('downloadReplayBtn');
+    const directLink = document.getElementById('replayDirectLink');
+    const errorDiv = document.getElementById('replayError');
+
+    // Set up video
+    replayVideo.src = videoUrl;
+
+    replayVideo.onloadeddata = () => {
+        // Video loaded successfully
+        replayVideo.play().catch(() => {
+            // Autoplay may be blocked, controls are available
+            console.log('Autoplay prevented, user can tap play');
+        });
+    };
+
+    replayVideo.onerror = () => {
+        errorDiv.textContent = 'Failed to load video. The link may have expired or be invalid.';
+        errorDiv.style.display = 'block';
+    };
+
+    // Download button - fetches video and triggers download
+    downloadBtn.onclick = async () => {
+        downloadBtn.disabled = true;
+        downloadBtn.textContent = 'DOWNLOADING...';
+
+        try {
+            const response = await fetch(videoUrl);
+            if (!response.ok) throw new Error('Failed to fetch video');
+
+            const blob = await response.blob();
+            const url = URL.createObjectURL(blob);
+
+            // Try programmatic download
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'photosynthesis-booth-replay.mp4';
+            a.style.display = 'none';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
+            downloadBtn.textContent = 'DOWNLOADED!';
+            setTimeout(() => {
+                downloadBtn.disabled = false;
+                downloadBtn.textContent = 'DOWNLOAD VIDEO';
+            }, 2000);
+        } catch (err) {
+            console.error('Download failed:', err);
+            downloadBtn.textContent = 'ERROR - TRY AGAIN';
+            setTimeout(() => {
+                downloadBtn.disabled = false;
+                downloadBtn.textContent = 'DOWNLOAD VIDEO';
+            }, 3000);
+        }
+    };
+
+    // Direct link fallback
+    directLink.href = videoUrl;
 }
 
 function showScreen(id) {
@@ -1057,7 +1144,9 @@ async function processReplayStrip() {
 
     // Reset progress bar
     const progressBar = document.getElementById('replayProgressBar');
+    const statusEl = document.getElementById('replayStatus');
     if (progressBar) progressBar.style.width = '0%';
+    if (statusEl) statusEl.textContent = 'Compositing video frames...';
 
     try {
         // Get selected frame and video indices
@@ -1065,27 +1154,46 @@ async function processReplayStrip() {
         const selectedIndices = selectedPhotoIndices;
 
         // Generate animated replay strip
-        const statusEl = document.getElementById('replayStatus');
         if (statusEl) statusEl.textContent = 'Compositing video frames...';
 
         const videoBlob = await generateReplayStrip(selectedIndices, selectedFrameData);
 
+        // Store blob for potential retry / local fallback
+        replayVideoBlob = videoBlob;
+
         // Upload to Cloudinary
-        if (statusEl) statusEl.textContent = 'Uploading to Cloudinary...';
+        if (statusEl) statusEl.textContent = 'Uploading replay & generating QR...';
+
         let cloudinaryUrl;
+        let uploadError = null;
         try {
             cloudinaryUrl = await uploadToCloudinary(videoBlob);
         } catch (err) {
             console.error('Cloudinary upload failed:', err);
-            if (statusEl) statusEl.textContent = `Upload failed: ${err.message}`;
-            // Fall back to local object URL for QR/replay
-            cloudinaryUrl = URL.createObjectURL(videoBlob);
-            createdObjectUrls.push(cloudinaryUrl);
-            if (statusEl) statusEl.textContent = 'Using local link (Cloudinary upload failed)';
+            uploadError = err;
         }
 
-        // Store URL for download button
-        window.replayVideoUrl = cloudinaryUrl;
+        if (uploadError) {
+            // Clear any previous retry/error UI
+            const replayContainer = document.getElementById('replayPreviewContainer');
+            const replayVideo = document.getElementById('replayPreview');
+            if (replayContainer && replayVideo) {
+                replayContainer.style.display = 'block';
+                replayVideo.src = URL.createObjectURL(videoBlob);
+                createdObjectUrls.push(replayVideo.src);
+            }
+            if (statusEl) statusEl.textContent = `Upload failed — QR code will point to homepage without video.`;
+            showScreen('resultScreen');
+            // QR code will encode just the base homepage (no replay param)
+            renderQRCode('https://seanyooo.github.io/photosynthesisbooth/');
+            const qrSection = document.getElementById('qrSection');
+            if (qrSection) qrSection.style.display = 'block';
+            const downloadVideoBtn = document.getElementById('downloadVideoBtn');
+            if (downloadVideoBtn) downloadVideoBtn.style.display = 'block';
+            return;
+        }
+
+        replayCloudinaryUrl = cloudinaryUrl;
 
         // Show result screen with replay preview and QR code
         showResultWithReplay(cloudinaryUrl);
@@ -1141,19 +1249,6 @@ function downloadReplayVideo() {
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-}
-
-/**
- * Checks if URL has replay parameter and loads mobile replay view.
- * Call this on page load in replay.html.
- */
-function initMobileReplay() {
-    const params = new URLSearchParams(window.location.search);
-    const replayUrl = params.get('replay');
-    if (replayUrl) {
-        // This is the mobile replay page
-        loadMobileReplay(replayUrl);
-    }
 }
 
 function startNewSession() {
