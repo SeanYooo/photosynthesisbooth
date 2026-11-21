@@ -462,3 +462,59 @@ button.secondary {
 #canvas {
     display: none;
 }
+
+/* Replay Processing Screen */
+#replayProcessingScreen .processing-title {
+    font-size: 48px;
+}
+
+#replayProcessingScreen .progress-container {
+    max-width: 600px;
+}
+
+#replayStatus {
+    font-size: 16px;
+    color: var(--muted);
+    text-align: center;
+    min-height: 1.5em;
+}
+
+/* Replay Preview on Result Screen */
+#replayPreviewContainer {
+    animation: fadeIn 0.5s ease-out;
+}
+
+#replayPreviewContainer .tagline {
+    margin-bottom: 12px;
+    font-size: 13px;
+}
+
+/* QR Code Section */
+#qrSection {
+    animation: fadeIn 0.5s ease-out 0.2s both;
+}
+
+#qrSection .tagline {
+    margin-bottom: 16px;
+    font-size: 13px;
+}
+
+#qrCanvas {
+    background: white;
+    border: 2px solid var(--border);
+}
+
+/* Download Video Button */
+#downloadVideoBtn {
+    animation: fadeIn 0.5s ease-out 0.4s both;
+}
+
+/* Timer countdown enhancements for 10s */
+#timer.countdown-active {
+    font-size: 110px;
+    transition: font-size 0.2s ease;
+}
+
+#timer.countdown-final {
+    font-size: 64px;
+}

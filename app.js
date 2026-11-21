@@ -28,6 +28,22 @@ const SLOT = {
     gap: 35,
 };
 
+// Live Motion Replay constants
+const COUNTDOWN_SECONDS = 10;
+const VIDEO_BUFFER_SECONDS = 4;
+const VIDEO_FPS = 30;
+const REPLAY_DURATION_SECONDS = 4;
+const REPLAY_TOTAL_FRAMES = REPLAY_DURATION_SECONDS * VIDEO_FPS; // 120 frames
+
+// Video MIME type preference: MP4 (H.264) for iOS Safari, fallback to WebM (VP9)
+const VIDEO_MIME = MediaRecorder.isTypeSupported('video/mp4;codecs=avc1.42E01E')
+    ? 'video/mp4;codecs=avc1.42E01E'
+    : 'video/webm;codecs=vp9';
+
+// Cloudinary config (fallback defaults; can be overridden via window.ENV at build time)
+const CLOUDINARY_CLOUD_NAME = (window.ENV && window.ENV.CLOUDINARY_CLOUD_NAME) || 'bhgpuo3w';
+const CLOUDINARY_UPLOAD_PRESET = (window.ENV && window.ENV.CLOUDINARY_UPLOAD_PRESET) || 'photosynthesisbooth';
+
 const FRAME_ASSET_DIR = "frames/";
 const FRAME_THUMB_DIR = "frames/thumbs/";
 
@@ -74,12 +90,19 @@ const PHOTOS_PER_SESSION = 6;
 const PHOTOS_TO_KEEP = 4;
 const FRAME_SELECTION_SECONDS = 60;
 
-let capturedPhotos = [];
+let capturedPhotos = []; // Array of { still: url, video: blob, videoUrl: objectUrl }
 let selectedPhotoIndices = [];
 let selectedFrame = null;
 let cameraStream = null;
 let frameSelectionInterval = null;
 let createdObjectUrls = [];
+
+// Live Motion Replay state
+let mediaRecorder = null;
+let videoChunks = [];
+let videoStartTime = 0;
+let countdownInterval = null;
+let countdownStartTime = 0;
 
 // Cache of loaded frame images, keyed by slug: slug -> { base, overlay }.
 // Populated once by preloadAllFrames() on startup; getFrameAssets() falls
@@ -295,19 +318,29 @@ document.getElementById("startBtn").onclick = async function () {
 
     for (let i = 0; i < PHOTOS_PER_SESSION; i++) {
         labelEl.innerText = `SNAP ${i + 1} / ${PHOTOS_PER_SESSION}`;
-        for (let c = 3; c > 0; c--) {
-            timerEl.classList.remove("timer-success");
-            timerEl.innerText = c;
-            await new Promise((r) => setTimeout(r, 600));
-        }
 
+        // Start video recording for this shot
+        await startVideoRecording();
+
+        // 10-second countdown with smooth timer updates
+        await runCountdown(COUNTDOWN_SECONDS, timerEl);
+
+        // At 0s: trigger flash, capture still photo, finalize video
         triggerFlash();
 
         timerEl.classList.add("timer-success");
         timerEl.innerText = "LIGHT CAPTURED! ✨";
 
         const photoSource = await capturePhotoSource();
-        capturedPhotos.push(photoSource);
+        const videoBlob = await stopVideoRecording();
+
+        capturedPhotos.push({
+            still: photoSource,
+            video: videoBlob,
+            videoUrl: videoBlob ? URL.createObjectURL(videoBlob) : null
+        });
+        if (videoBlob) createdObjectUrls.push(capturedPhotos[capturedPhotos.length - 1].videoUrl);
+
         await new Promise((r) => setTimeout(r, 800));
     }
 
@@ -315,13 +348,115 @@ document.getElementById("startBtn").onclick = async function () {
     setupSelection();
 };
 
+/**
+ * Starts MediaRecorder to capture video from the camera stream.
+ * Uses a circular buffer to keep only the last VIDEO_BUFFER_SECONDS.
+ */
+async function startVideoRecording() {
+    videoChunks = [];
+    videoStartTime = Date.now();
+
+    try {
+        const stream = video.srcObject;
+        if (!stream) throw new Error('No camera stream available');
+
+        mediaRecorder = new MediaRecorder(stream, { mimeType: VIDEO_MIME });
+
+        mediaRecorder.ondataavailable = (event) => {
+            if (event.data && event.data.size > 0) {
+                videoChunks.push(event.data);
+                // Trim buffer to keep only last VIDEO_BUFFER_SECONDS
+                trimVideoBuffer();
+            }
+        };
+
+        // Request data every 100ms for smoother buffer management
+        mediaRecorder.start(100);
+    } catch (err) {
+        console.warn('MediaRecorder not available, video capture disabled:', err);
+        mediaRecorder = null;
+    }
+}
+
+/**
+ * Trims videoChunks to keep only approximately the last VIDEO_BUFFER_SECONDS.
+ * Uses blob size estimation since we don't have exact timestamps.
+ */
+function trimVideoBuffer() {
+    if (!mediaRecorder || videoChunks.length === 0) return;
+
+    // Estimate: each chunk is ~100ms at our recording interval
+    // We want to keep VIDEO_BUFFER_SECONDS * 10 chunks
+    const maxChunks = VIDEO_BUFFER_SECONDS * 10;
+    if (videoChunks.length > maxChunks) {
+        videoChunks = videoChunks.slice(-maxChunks);
+    }
+}
+
+/**
+ * Runs a visual countdown for the specified seconds.
+ * Updates timerEl every 100ms for smooth animation.
+ */
+function runCountdown(seconds, timerEl) {
+    return new Promise((resolve) => {
+        const startTime = Date.now();
+        const endTime = startTime + seconds * 1000;
+
+        timerEl.classList.remove("timer-success");
+
+        countdownInterval = setInterval(() => {
+            const now = Date.now();
+            const remaining = Math.max(0, Math.ceil((endTime - now) / 1000));
+
+            // Show tenths of seconds for last 3 seconds for precision feel
+            if (remaining <= 3) {
+                const remainingMs = endTime - now;
+                const tenths = Math.ceil(remainingMs / 100) / 10;
+                timerEl.innerText = tenths.toFixed(1);
+            } else {
+                timerEl.innerText = remaining;
+            }
+
+            if (now >= endTime) {
+                clearInterval(countdownInterval);
+                countdownInterval = null;
+                timerEl.innerText = "0";
+                resolve();
+            }
+        }, 100);
+    });
+}
+
+/**
+ * Stops video recording and returns the buffered video as a Blob.
+ * Returns null if MediaRecorder wasn't available.
+ */
+async function stopVideoRecording() {
+    if (!mediaRecorder) return null;
+
+    return new Promise((resolve) => {
+        mediaRecorder.onstop = () => {
+            if (videoChunks.length === 0) {
+                resolve(null);
+                return;
+            }
+            const blob = new Blob(videoChunks, { type: VIDEO_MIME });
+            videoChunks = [];
+            mediaRecorder = null;
+            resolve(blob);
+        };
+
+        mediaRecorder.stop();
+    });
+}
+
 function setupSelection() {
     const grid = document.getElementById("selectionGrid");
     grid.innerHTML = "";
-    capturedPhotos.forEach((src, idx) => {
+    capturedPhotos.forEach((photoObj, idx) => {
         const div = document.createElement("div");
         div.className = "photo-choice";
-        div.innerHTML = `<img src="${src}" alt="Captured photo ${idx + 1}">`;
+        div.innerHTML = `<img src="${photoObj.still}" alt="Captured photo ${idx + 1}">`;
         div.onclick = () => {
             if (selectedPhotoIndices.includes(idx)) {
                 selectedPhotoIndices = selectedPhotoIndices.filter((i) => i !== idx);
@@ -353,7 +488,7 @@ document.getElementById("confirmPhotosBtn").onclick = async () => {
     }, 50);
 
     const photoImgs = await Promise.all(
-        selectedPhotoIndices.map((i) => loadImage(capturedPhotos[i]))
+        selectedPhotoIndices.map((i) => loadImage(capturedPhotos[i].still))
     );
 
     const grid = document.getElementById("frameGrid");
@@ -501,7 +636,7 @@ async function generateFinal() {
 
     try {
         const photoImgs = await Promise.all(
-            selectedPhotoIndices.map((i) => loadImage(capturedPhotos[i]))
+            selectedPhotoIndices.map((i) => loadImage(capturedPhotos[i].still))
         );
         const selectedFrameData = selectedFrame || FRAMES[0];
         const finalCanvas = document.createElement("canvas");
@@ -516,13 +651,17 @@ async function generateFinal() {
             }, "image/png");
         });
         const url = URL.createObjectURL(blob);
+        createdObjectUrls.push(url);
 
         document.getElementById("finalOutput").innerHTML =
             `<img src="${url}" style="max-height: 75vh; width: auto; border-radius: 8px;" alt="Final photo strip">`;
         const downloadLink = document.getElementById("downloadLink");
         downloadLink.href = url;
         downloadLink.download = "lock-in-strip.png";
-        showScreen("resultScreen");
+
+        // After generating still, process the replay strip
+        await processReplayStrip();
+
     } catch (err) {
         console.error("Final generation failed", err);
         const message = err?.message || String(err);
@@ -560,6 +699,305 @@ function loadImage(src) {
         img.onerror = () => resolve(null);
         img.src = src;
     });
+}
+
+/** Loads a video from a Blob and returns a ready-to-seek <video> element. */
+function loadVideo(blob) {
+    return new Promise((resolve, reject) => {
+        if (!blob) return resolve(null);
+        const url = URL.createObjectURL(blob);
+        createdObjectUrls.push(url);
+        const video = document.createElement('video');
+        video.src = url;
+        video.muted = true;
+        video.playsInline = true;
+        video.preload = 'metadata';
+        video.onloadedmetadata = () => {
+            // Seek to 0 to ensure it's ready
+            video.currentTime = 0;
+            resolve(video);
+        };
+        video.onerror = () => {
+            URL.revokeObjectURL(url);
+            reject(new Error('Failed to load video'));
+        };
+    });
+}
+
+/**
+ * Generates the animated replay strip by compositing 4 video clips
+ * into the selected frame at 30fps for 4 seconds (120 frames total).
+ */
+async function generateReplayStrip(selectedIndices, frame) {
+    const canvas = document.createElement('canvas');
+    canvas.width = SLOT.canvasWidth;
+    canvas.height = SLOT.canvasHeight;
+    const ctx = canvas.getContext('2d');
+
+    // Capture canvas stream at 30fps
+    const stream = canvas.captureStream(VIDEO_FPS);
+    const recorder = new MediaRecorder(stream, { mimeType: VIDEO_MIME });
+    const chunks = [];
+
+    recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) chunks.push(e.data);
+    };
+
+    // Load frame assets (base + overlay)
+    const frameAssets = await getFrameAssets(frame);
+
+    // Load the 4 selected videos
+    const videoBlobs = selectedIndices.map(i => capturedPhotos[i].video);
+    const videos = await Promise.all(videoBlobs.map(loadVideo));
+
+    // Calculate slot positions (same as drawToCanvas)
+    const scale = canvas.width / SLOT.canvasWidth;
+    const pW = SLOT.photoWidth * scale;
+    const pH = SLOT.photoHeight * scale;
+    const startY = SLOT.startY * scale;
+    const gap = SLOT.gap * scale;
+    const xPos = (canvas.width - pW) / 2;
+
+    const slotPositions = [];
+    for (let i = 0; i < 4; i++) {
+        slotPositions.push({
+            x: xPos,
+            y: startY + i * (pH + gap),
+            w: pW,
+            h: pH
+        });
+    }
+
+    recorder.start();
+
+    // Render 120 frames (4 seconds at 30fps)
+    for (let frameIdx = 0; frameIdx < REPLAY_TOTAL_FRAMES; frameIdx++) {
+        const t = frameIdx / VIDEO_FPS; // time in seconds
+
+        // Clear and draw white background
+        ctx.fillStyle = 'white';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Draw frame base
+        if (frameAssets.base) {
+            ctx.drawImage(frameAssets.base, 0, 0, canvas.width, canvas.height);
+        }
+
+        // Draw each video frame in its slot
+        for (let i = 0; i < 4; i++) {
+            const video = videos[i];
+            const slot = slotPositions[i];
+            if (video && video.readyState >= 2) { // HAVE_CURRENT_DATA
+                video.currentTime = t;
+                // Draw video frame fitted to slot (cover)
+                const vAspect = video.videoWidth / video.videoHeight;
+                const slotAspect = slot.w / slot.h;
+                let sx, sy, sw, sh;
+                if (vAspect > slotAspect) {
+                    sh = video.videoHeight;
+                    sw = sh * slotAspect;
+                    sx = (video.videoWidth - sw) / 2;
+                    sy = 0;
+                } else {
+                    sw = video.videoWidth;
+                    sh = sw / slotAspect;
+                    sx = 0;
+                    sy = (video.videoHeight - sh) / 2;
+                }
+                ctx.drawImage(video, sx, sy, sw, sh, slot.x, slot.y, slot.w, slot.h);
+            }
+        }
+
+        // Draw frame overlay on top
+        if (frameAssets.overlay) {
+            ctx.drawImage(frameAssets.overlay, 0, 0, canvas.width, canvas.height);
+        }
+
+        // Update progress
+        if (frameIdx % 10 === 0) {
+            const progress = Math.round((frameIdx / REPLAY_TOTAL_FRAMES) * 100);
+            const progressBar = document.getElementById('replayProgressBar');
+            const statusEl = document.getElementById('replayStatus');
+            if (progressBar) progressBar.style.width = `${progress}%`;
+            if (statusEl) statusEl.textContent = `Rendering frame ${frameIdx + 1} / ${REPLAY_TOTAL_FRAMES}...`;
+        }
+
+        // Wait for next frame (sync to 30fps)
+        await new Promise(r => requestAnimationFrame(r));
+    }
+
+    recorder.stop();
+
+    return new Promise((resolve) => {
+        recorder.onstop = () => {
+            const blob = new Blob(chunks, { type: VIDEO_MIME });
+            resolve(blob);
+        };
+    });
+}
+
+/**
+ * Normalizes Cloudinary URL to ensure MP4 delivery with auto quality.
+ */
+function normalizeCloudinaryUrl(url) {
+    return url
+        .replace('/video/upload/', '/video/upload/f_mp4,q_auto/')
+        .replace(/\.(webm|mov|avi|mkv)$/i, '.mp4');
+}
+
+/**
+ * Uploads video blob to Cloudinary and returns normalized secure URL.
+ */
+async function uploadToCloudinary(videoBlob) {
+    const cloudName = window.CLOUDINARY_CLOUD_NAME || CLOUDINARY_CLOUD_NAME;
+    const uploadPreset = window.CLOUDINARY_UPLOAD_PRESET || CLOUDINARY_UPLOAD_PRESET;
+
+    const formData = new FormData();
+    formData.append('file', videoBlob);
+    formData.append('upload_preset', uploadPreset);
+
+    const statusEl = document.getElementById('replayStatus');
+    if (statusEl) statusEl.textContent = 'Uploading to Cloudinary...';
+
+    const response = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/video/upload`, {
+        method: 'POST',
+        body: formData
+    });
+
+    if (!response.ok) {
+        const error = await response.json();
+        throw new Error(`Cloudinary upload failed: ${error.error?.message || response.statusText}`);
+    }
+
+    const data = await response.json();
+    return normalizeCloudinaryUrl(data.secure_url);
+}
+
+/**
+ * Renders QR code to canvas using qrcodejs.
+ */
+function renderQRCode(url) {
+    const canvas = document.getElementById('qrCanvas');
+    if (!canvas) return;
+
+    // Clear canvas
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Use qrcodejs if available
+    if (typeof QRCode !== 'undefined') {
+        new QRCode(canvas, {
+            text: url,
+            width: 512,
+            height: 512,
+            correctLevel: QRCode.CorrectLevel.H,
+            colorDark: '#062014',
+            colorLight: '#ffffff'
+        });
+    } else {
+        // Fallback: draw placeholder text
+        ctx.fillStyle = '#062014';
+        ctx.font = '24px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('QR Code library not loaded', canvas.width / 2, canvas.height / 2);
+    }
+}
+
+/**
+ * Shows the replay processing screen and generates the animated strip.
+ */
+async function processReplayStrip() {
+    showScreen('replayProcessingScreen');
+
+    // Reset progress bar
+    const progressBar = document.getElementById('replayProgressBar');
+    if (progressBar) progressBar.style.width = '0%';
+
+    try {
+        // Get selected frame and video indices
+        const selectedFrameData = selectedFrame || FRAMES[0];
+        const selectedIndices = selectedPhotoIndices;
+
+        // Generate animated replay strip
+        const statusEl = document.getElementById('replayStatus');
+        if (statusEl) statusEl.textContent = 'Compositing video frames...';
+
+        const videoBlob = await generateReplayStrip(selectedIndices, selectedFrameData);
+
+        // Upload to Cloudinary
+        if (statusEl) statusEl.textContent = 'Uploading to Cloudinary...';
+        const cloudinaryUrl = await uploadToCloudinary(videoBlob);
+
+        // Store URL for download button
+        window.replayVideoUrl = cloudinaryUrl;
+
+        // Show result screen with replay preview and QR code
+        showResultWithReplay(cloudinaryUrl);
+
+    } catch (err) {
+        console.error('Replay processing failed:', err);
+        const message = err?.message || String(err);
+        document.getElementById('replayStatus').textContent = `Error: ${message}`;
+        // Fall back to result screen without replay
+        showScreen('resultScreen');
+    }
+}
+
+/**
+ * Shows the result screen with replay video preview and QR code.
+ */
+function showResultWithReplay(videoUrl) {
+    // Show replay video preview
+    const replayContainer = document.getElementById('replayPreviewContainer');
+    const replayVideo = document.getElementById('replayPreview');
+    if (replayContainer && replayVideo) {
+        replayVideo.src = videoUrl;
+        replayContainer.style.display = 'block';
+    }
+
+    // Generate and show QR code
+    const replayPageUrl = `https://seanyooo.github.io/photosynthesisbooth/replay.html?replay=${encodeURIComponent(videoUrl)}`;
+    renderQRCode(replayPageUrl);
+
+    const qrSection = document.getElementById('qrSection');
+    if (qrSection) qrSection.style.display = 'block';
+
+    // Show download video button
+    const downloadVideoBtn = document.getElementById('downloadVideoBtn');
+    if (downloadVideoBtn) downloadVideoBtn.style.display = 'block';
+
+    showScreen('resultScreen');
+}
+
+/**
+ * Downloads the replay video from Cloudinary.
+ */
+function downloadReplayVideo() {
+    const url = window.replayVideoUrl;
+    if (!url) return;
+
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'lock-in-replay.mp4';
+    a.target = '_blank';
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+}
+
+/**
+ * Checks if URL has replay parameter and loads mobile replay view.
+ * Call this on page load in replay.html.
+ */
+function initMobileReplay() {
+    const params = new URLSearchParams(window.location.search);
+    const replayUrl = params.get('replay');
+    if (replayUrl) {
+        // This is the mobile replay page
+        loadMobileReplay(replayUrl);
+    }
 }
 
 function startNewSession() {

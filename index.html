@@ -5,6 +5,8 @@
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>Lock In | Photo Booth</title>
         <link rel="stylesheet" href="style.css?v=20260708" />
+        <!-- Config (gitignored, with fallback defaults in app.js) -->
+        <script src="config.js"></script>
         <!-- Open Graph / Twitter -->
         <meta property="og:title" content="Lock In — Photo Booth" />
         <meta property="og:description" content="Browser-based photo booth. Capture a 6-shot burst, pick 4, choose a frame, and download a printable photo strip." />
@@ -95,9 +97,32 @@
             </button>
         </div>
 
+        <!-- Replay Processing Screen -->
+        <div id="replayProcessingScreen" class="screen">
+            <div class="processing-title">Compositing Replay Strip...</div>
+            <div class="progress-container">
+                <div id="replayProgressBar" class="progress-bar"></div>
+            </div>
+            <div id="replayStatus" class="tagline" style="margin-top: 20px;">Preparing video...</div>
+        </div>
+
         <!-- Result Screen -->
         <div id="resultScreen" class="screen">
             <div class="result-container" id="finalOutput"></div>
+
+            <!-- Replay Video Preview -->
+            <div id="replayPreviewContainer" style="display: none; margin-top: 20px;">
+                <div class="tagline">Your Moving Photobooth Strip</div>
+                <video id="replayPreview" playsinline muted loop autoplay controls style="max-height: 60vh; width: auto; border-radius: 12px; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);"></video>
+            </div>
+
+            <!-- QR Code Section -->
+            <div id="qrSection" style="display: none; margin-top: 30px; text-align: center;">
+                <div class="tagline">Scan to View & Save on Mobile</div>
+                <canvas id="qrCanvas" width="512" height="512" style="max-width: 100%; border-radius: 16px; box-shadow: 0 15px 35px -10px rgba(0, 0, 0, 0.15);"></canvas>
+                <div class="tagline" style="margin-top: 12px; font-size: 12px;">Opens https://seanyooo.github.io/photosynthesisbooth/</div>
+            </div>
+
             <div
                 style="
                     display: flex;
@@ -121,6 +146,7 @@
                 >
                     <button type="button" onclick="downloadFinalImage(); return false;">DOWNLOAD STRIP</button>
                 </a>
+                <button id="downloadVideoBtn" class="secondary" style="display: none;" onclick="downloadReplayVideo(); return false;">SAVE VIDEO</button>
                 <button class="secondary" onclick="startNewSession()">
                     NEW SESSION
                 </button>
@@ -129,6 +155,8 @@
 
         <canvas id="canvas"></canvas>
 
+        <!-- QR Code Library -->
+        <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
         <script src="app.js?v=20260708b"></script>
     </body>
 </html>

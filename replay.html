@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+        <title>Lock In — Replay</title>
+        <style>
+            :root {
+                --bg-top: #ffffff;
+                --bg-bottom: #f0fdf4;
+                --panel: rgba(255, 255, 255, 0.95);
+                --text: #062014;
+                --muted: #4b6358;
+                --accent: #005c30;
+                --accent-hover: #007a40;
+                --border: #e2e8f0;
+                --success: #22c55e;
+                --bright-success: #4ade80;
+            }
+
+            * {
+                box-sizing: border-box;
+                user-select: none;
+            }
+
+            body {
+                margin: 0;
+                min-height: 100vh;
+                background-color: #f8fafc;
+                background-image: url("assets/bg-pattern.png");
+                background-repeat: repeat;
+                background-position: 0 0;
+                background-size: 300px;
+                background-attachment: fixed;
+                color: var(--text);
+                font-family:
+                    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                    Helvetica, Arial, sans-serif;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                overflow-x: hidden;
+            }
+
+            body::before {
+                content: "";
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: linear-gradient(
+                    to bottom,
+                    rgba(255, 255, 255, 0.9),
+                    rgba(240, 253, 244, 0.8)
+                );
+                z-index: -1;
+            }
+
+            .container {
+                width: 100%;
+                max-width: 480px;
+                padding: 24px 16px;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                position: relative;
+                z-index: 1;
+                min-height: 100vh;
+                justify-content: center;
+            }
+
+            .logo-container {
+                width: 100%;
+                max-width: 280px;
+                margin-bottom: 16px;
+                display: flex;
+                justify-content: center;
+            }
+
+            .logo-container img {
+                width: 100%;
+                height: auto;
+                aspect-ratio: 3840 / 2160;
+                object-fit: contain;
+            }
+
+            .tagline {
+                font-size: 13px;
+                color: var(--muted);
+                margin-bottom: 24px;
+                text-align: center;
+                letter-spacing: 1.5px;
+                text-transform: uppercase;
+                font-weight: 600;
+            }
+
+            .video-wrapper {
+                width: 100%;
+                aspect-ratio: 1 / 3; /* 1600:4800 = 1:3 */
+                border-radius: 24px;
+                overflow: hidden;
+                background: #000;
+                box-shadow: 0 45px 90px -20px rgba(0, 0, 0, 0.4);
+                border: 8px solid white;
+                margin-bottom: 24px;
+                position: relative;
+            }
+
+            #replayVideo {
+                width: 100%;
+                height: 100%;
+                object-fit: cover;
+                display: block;
+            }
+
+            .controls {
+                display: flex;
+                flex-direction: column;
+                gap: 14px;
+                width: 100%;
+                align-items: center;
+            }
+
+            button {
+                padding: 18px 28px;
+                border-radius: 99px;
+                border: none;
+                background: var(--accent);
+                color: white;
+                font-weight: 800;
+                font-size: 16px;
+                cursor: pointer;
+                transition: all 0.3s cubic-bezier(0.23, 1, 0.32, 1);
+                width: 100%;
+                max-width: 320px;
+                box-shadow: 0 12px 24px -6px rgba(0, 92, 48, 0.3);
+            }
+
+            button:hover:not(:disabled) {
+                background: var(--accent-hover);
+                transform: translateY(-3px);
+                box-shadow: 0 18px 32px -8px rgba(0, 92, 48, 0.4);
+            }
+
+            button:active:not(:disabled) {
+                transform: translateY(-1px);
+            }
+
+            button:disabled {
+                background: #cbd5e1;
+                cursor: not-allowed;
+                box-shadow: none;
+                transform: none;
+            }
+
+            button.secondary {
+                background: white;
+                color: var(--accent);
+                border: 2px solid var(--accent);
+                box-shadow: none;
+            }
+
+            button.secondary:hover:not(:disabled) {
+                background: #f0fdf4;
+                box-shadow: 0 12px 24px -6px rgba(0, 92, 48, 0.15);
+            }
+
+            .share-hint {
+                font-size: 12px;
+                color: var(--muted);
+                text-align: center;
+                margin-top: 8px;
+            }
+
+            .error-message {
+                background: #fef2f2;
+                border: 1px solid #fecaca;
+                color: #b91c1c;
+                padding: 16px 20px;
+                border-radius: 12px;
+                max-width: 400px;
+                text-align: center;
+                margin-top: 20px;
+            }
+
+            .loading {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                gap: 16px;
+                color: var(--muted);
+            }
+
+            .spinner {
+                width: 48px;
+                height: 48px;
+                border: 4px solid var(--border);
+                border-top-color: var(--accent);
+                border-radius: 50%;
+                animation: spin 1s linear infinite;
+            }
+
+            @keyframes spin {
+                to { transform: rotate(360deg); }
+            }
+        </style>
+        <!-- Open Graph for sharing -->
+        <meta property="og:title" content="Lock In — Your Photobooth Replay" />
+        <meta property="og:description" content="Watch and save your moving photobooth strip!" />
+        <meta property="og:type" content="website" />
+        <meta property="og:url" content="https://seanyooo.github.io/photosynthesisbooth/replay.html" />
+        <meta name="twitter:card" content="player" />
+        <meta name="twitter:title" content="Lock In — Your Photobooth Replay" />
+        <meta name="twitter:description" content="Watch and save your moving photobooth strip!" />
+        <meta name="twitter:player" content="https://seanyooo.github.io/photosynthesisbooth/replay.html" />
+        <meta name="twitter:player:width" content="480" />
+        <meta name="twitter:player:height" content="1440" />
+    </head>
+    <body>
+        <div class="container">
+            <div class="logo-container">
+                <img src="assets/booth-logo.png" alt="Lock In logo" width="3840" height="2160" loading="eager" decoding="async" fetchpriority="high" />
+            </div>
+
+            <div id="loadingState" class="loading">
+                <div class="spinner"></div>
+                <div class="tagline">Loading your replay...</div>
+            </div>
+
+            <div id="errorState" class="error-message" style="display: none;"></div>
+
+            <div id="videoState" style="display: none;">
+                <div class="video-wrapper">
+                    <video
+                        id="replayVideo"
+                        playsinline
+                        muted
+                        loop
+                        autoplay
+                        poster="assets/booth-logo.png"
+                    ></video>
+                </div>
+
+                <div class="controls">
+                    <button id="saveBtn" onclick="saveVideo()">
+                        SAVE TO PHONE
+                    </button>
+                    <button class="secondary" onclick="shareVideo()">
+                        SHARE
+                    </button>
+                    <button class="secondary" onclick="window.location.href='https://seanyooo.github.io/photosynthesisbooth/'">
+                        NEW SESSION
+                    </button>
+                </div>
+
+                <div class="share-hint">
+                    Tap "Save to Phone" to download, or "Share" to send via AirDrop, Messages, etc.
+                </div>
+            </div>
+        </div>
+
+        <script>
+            // Get replay URL from query parameter
+            const params = new URLSearchParams(window.location.search);
+            const replayUrl = params.get('replay');
+
+            const loadingState = document.getElementById('loadingState');
+            const errorState = document.getElementById('errorState');
+            const videoState = document.getElementById('videoState');
+            const replayVideo = document.getElementById('replayVideo');
+            const saveBtn = document.getElementById('saveBtn');
+
+            if (!replayUrl) {
+                showError('No replay video specified. Please scan the QR code from the photo booth.');
+            } else {
+                // Set up video
+                replayVideo.src = replayUrl;
+
+                // Update OG meta tags for sharing
+                updateMetaTags(replayUrl);
+
+                replayVideo.onloadeddata = () => {
+                    loadingState.style.display = 'none';
+                    videoState.style.display = 'block';
+                    // Ensure autoplay works
+                    replayVideo.play().catch(() => {
+                        // Autoplay blocked, user will need to tap play
+                        console.log('Autoplay prevented, showing controls');
+                    });
+                };
+
+                replayVideo.onerror = () => {
+                    showError('Failed to load video. The link may have expired.');
+                };
+            }
+
+            function showError(message) {
+                loadingState.style.display = 'none';
+                errorState.textContent = message;
+                errorState.style.display = 'block';
+                videoState.style.display = 'none';
+            }
+
+            function updateMetaTags(videoUrl) {
+                // Update twitter:player:stream for video
+                const twitterPlayer = document.querySelector('meta[name="twitter:player:stream"]');
+                if (twitterPlayer) {
+                    twitterPlayer.content = videoUrl;
+                } else {
+                    const meta = document.createElement('meta');
+                    meta.name = 'twitter:player:stream';
+                    meta.content = videoUrl;
+                    document.head.appendChild(meta);
+                }
+
+                const twitterPlayerType = document.querySelector('meta[name="twitter:player:stream:content_type"]');
+                if (twitterPlayerType) {
+                    twitterPlayerType.content = 'video/mp4';
+                } else {
+                    const meta = document.createElement('meta');
+                    meta.name = 'twitter:player:stream:content_type';
+                    meta.content = 'video/mp4';
+                    document.head.appendChild(meta);
+                }
+            }
+
+            async function saveVideo() {
+                if (!replayUrl) return;
+
+                saveBtn.disabled = true;
+                saveBtn.textContent = 'DOWNLOADING...';
+
+                try {
+                    // Fetch the video as blob
+                    const response = await fetch(replayUrl);
+                    if (!response.ok) throw new Error('Failed to fetch video');
+
+                    const blob = await response.blob();
+                    const file = new File([blob], 'lock-in-replay.mp4', { type: 'video/mp4' });
+
+                    // Try Web Share API (Level 2) with files
+                    if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+                        await navigator.share({
+                            title: 'Lock In — Photobooth Replay',
+                            text: 'My moving photobooth strip!',
+                            files: [file]
+                        });
+                        saveBtn.textContent = 'SHARED!';
+                        setTimeout(() => {
+                            saveBtn.disabled = false;
+                            saveBtn.textContent = 'SAVE TO PHONE';
+                        }, 2000);
+                        return;
+                    }
+
+                    // Fallback: direct download via <a download>
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'lock-in-replay.mp4';
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+
+                    saveBtn.textContent = 'SAVED!';
+                    setTimeout(() => {
+                        saveBtn.disabled = false;
+                        saveBtn.textContent = 'SAVE TO PHONE';
+                    }, 2000);
+                } catch (err) {
+                    console.error('Save failed:', err);
+                    saveBtn.textContent = 'ERROR - TRY AGAIN';
+                    setTimeout(() => {
+                        saveBtn.disabled = false;
+                        saveBtn.textContent = 'SAVE TO PHONE';
+                    }, 3000);
+                }
+            }
+
+            async function shareVideo() {
+                if (!replayUrl) return;
+
+                try {
+                    // Try sharing the URL directly
+                    if (navigator.share) {
+                        await navigator.share({
+                            title: 'Lock In — Photobooth Replay',
+                            text: 'Check out my moving photobooth strip!',
+                            url: window.location.href
+                        });
+                    } else {
+                        // Fallback: copy to clipboard
+                        await navigator.clipboard.writeText(window.location.href);
+                        alert('Link copied to clipboard!');
+                    }
+                } catch (err) {
+                    if (err.name !== 'AbortError') {
+                        console.error('Share failed:', err);
+                        // Fallback to clipboard
+                        try {
+                            await navigator.clipboard.writeText(window.location.href);
+                            alert('Link copied to clipboard!');
+                        } catch (e) {
+                            console.error('Clipboard failed:', e);
+                        }
+                    }
+                }
+            }
+        </script>
+    </body>
+</html>
