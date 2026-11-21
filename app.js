@@ -29,44 +29,45 @@ const SLOT = {
 };
 
 const FRAME_ASSET_DIR = "frames/";
+const FRAME_THUMB_DIR = "frames/thumbs/";
 
-// Single source of truth for frames: name and price. The base/overlay PNGs
+// Single source of truth for frames: name. The base/overlay PNGs
 // are resolved automatically from `name` (see getFrameSlug) — add a new
 // frame by adding an entry here and dropping matching PNGs into /frames/,
 // no other wiring required. Set an explicit `slug` only if you need the
 // filename to differ from the auto-generated one (e.g. to avoid a
 // collision, or to keep an existing filename when renaming a frame).
 const FRAMES = [
-    { name: "Lucky Green", price: "PHP 30" },
-    { name: "Midnight Sky", price: "PHP 30" },
-    { name: "Cloud Dancer", price: "PHP 30" },
-    { name: "Pacific Breeze", price: "PHP 30" },
-    { name: "Kanibalismo II", price: "PHP 40" },
-    { name: "Eternal Sunshine", price: "PHP 40" },
-    { name: "Urban Steel", price: "PHP 40" },
-    { name: "Pastel Pony", price: "PHP 40" },
-    { name: "Dream Atlas", price: "PHP 40" },
-    { name: "Static & Stars", price: "PHP 40" },
-    { name: "Neon Summer", price: "PHP 40" },
-    { name: "IVOS", price: "PHP 40" },
-    { name: "Chrome Forever", price: "PHP 40" },
-    { name: "Stay Grounded", price: "PHP 40" },
-    { name: "Lost & Found Season", price: "PHP 40" },
-    { name: "Citrus Punch", price: "PHP 40" },
-    { name: "Midnight Sun", price: "PHP 40" },
-    { name: "Quick & Cute", price: "PHP 40" },
-    { name: "Rose Static", price: "PHP 40" },
-    { name: "Alaala", price: "PHP 40" },
-    { name: "Saan?", price: "PHP 40" },
-    { name: "Kapow!", price: "PHP 40" },
-    { name: "STEMAZING", price: "PHP 40" },
-    { name: "Humanista", price: "PHP 40" },
-    { name: "Kapitalista", price: "PHP 40" },
-    { name: "Snorkle", price: "PHP 40" },
-    { name: "Y2K Wallpaper", price: "PHP 40" },
-    { name: "Stars", price: "PHP 40" },
-    { name: "Bleed Crimson", price: "PHP 40" },
-    { name: "Luxe Velvet", price: "PHP 40" },
+    { name: "Lucky Green" },
+    { name: "Midnight Sky" },
+    { name: "Cloud Dancer" },
+    { name: "Pacific Breeze" },
+    { name: "Kanibalismo II" },
+    { name: "Eternal Sunshine" },
+    { name: "Urban Steel" },
+    { name: "Pastel Pony" },
+    { name: "Dream Atlas" },
+    { name: "Static & Stars" },
+    { name: "Neon Summer" },
+    { name: "IVOS" },
+    { name: "Chrome Forever" },
+    { name: "Stay Grounded" },
+    { name: "Lost & Found Season" },
+    { name: "Citrus Punch" },
+    { name: "Midnight Sun" },
+    { name: "Quick & Cute" },
+    { name: "Rose Static" },
+    { name: "Alaala" },
+    { name: "Saan?" },
+    { name: "Kapow!" },
+    { name: "STEMAZING" },
+    { name: "Humanista" },
+    { name: "Kapitalista" },
+    { name: "Snorkle" },
+    { name: "Y2K Wallpaper" },
+    { name: "Stars" },
+    { name: "Bleed Crimson" },
+    { name: "Luxe Velvet" },
 ];
 
 const PHOTOS_PER_SESSION = 6;
@@ -217,21 +218,48 @@ async function getFrameAssets(frame) {
 }
 
 /**
- * Kicks off the booth: preload all frame images and request camera access
- * in parallel, then move to the ready screen. Triggered by a user gesture
- * (the home screen button), which getUserMedia requires.
+ * Loads the 400x1200 preview thumbnails for a frame (frames/thumbs/<slug>.webp
+ * for the base, frames/thumbs/<slug>-overlay.webp for the overlay).
+ * Falls back to resizing the full PNGs if the thumbs are missing.
+ */
+async function getFrameThumb(frame) {
+    const slug = getFrameSlug(frame);
+    const basePath = `${FRAME_THUMB_DIR}${slug}.webp`;
+    const overlayPath = `${FRAME_THUMB_DIR}${slug}-overlay.webp`;
+    if (frameAssetCache.has(basePath)) return frameAssetCache.get(basePath);
+    let base = await loadImage(basePath);
+    let overlay = await loadImage(overlayPath);
+    if (!base) {
+        // fallback: build thumbs from the full assets
+        const full = await getFrameAssets(frame);
+        if (!full.base) return { base: null, overlay: null };
+        const c = document.createElement("canvas");
+        c.width = 400; c.height = 1200;
+        const ctx = c.getContext("2d");
+        ctx.fillStyle = "white"; ctx.fillRect(0, 0, c.width, c.height);
+        ctx.drawImage(full.base, 0, 0, c.width, c.height);
+        base = c;
+        overlay = full.overlay ? await loadImage(overlayPath) : null;
+    }
+    const pair = { base, overlay };
+    frameAssetCache.set(basePath, pair);
+    return pair;
+}
+
+/**
+ * Kicks off the booth: request camera access, then move to the ready screen.
+ * Frame previews are loaded lazily at frame selection time from
+ * frames/thumbs/*.webp, and the full-size base/overlay only when the user
+ * picks a frame. Triggered by a user gesture (the home screen button),
+ * which getUserMedia requires.
  */
 async function beginSetup() {
     showScreen("initScreen");
 
     try {
-        const [, stream] = await Promise.all([
-            preloadAllFrames(),
-            navigator.mediaDevices.getUserMedia({
-                video: { width: 1920, height: 1080 },
-            }),
-        ]);
-        cameraStream = stream;
+        cameraStream = await navigator.mediaDevices.getUserMedia({
+            video: { width: 1920, height: 1080 },
+        });
         video.srcObject = cameraStream;
         setTimeout(() => showScreen("readyPrompt"), 1000);
     } catch (err) {
@@ -346,12 +374,12 @@ document.getElementById("confirmPhotosBtn").onclick = async () => {
         const cnv = document.createElement("canvas");
         cnv.width = 400;
         cnv.height = 1200;
+        card.appendChild(cnv);
 
         const info = document.createElement("div");
         info.className = "frame-label-overlay";
         info.innerHTML = `
             <div class="frame-name">${frame.name}</div>
-            <div class="frame-price">${frame.price}</div>
         `;
 
         card.appendChild(cnv);
@@ -365,7 +393,33 @@ document.getElementById("confirmPhotosBtn").onclick = async () => {
 
         grid.appendChild(card);
         observer.observe(card);
-        drawToCanvas(cnv, frame, photoImgs);
+
+        // Preview: draw base thumb, then the user's 4 photos, then the overlay
+        // thumb — the same layer order as generateFinal() so overlay art that
+        // overlaps a photo slot sits on top of the photo. No full PNG needed.
+        (async () => {
+            const pair = await getFrameThumb(frame);
+            const thumbBase = pair?.base;
+            const thumbOverlay = pair?.overlay;
+            if (!thumbBase) return;
+            cnv.width = 400; cnv.height = 1200;
+            const tCtx = cnv.getContext("2d");
+            tCtx.fillStyle = "white"; tCtx.fillRect(0, 0, cnv.width, cnv.height);
+            tCtx.drawImage(thumbBase, 0, 0, cnv.width, cnv.height);
+            const scale = cnv.width / SLOT.canvasWidth;
+            const pW = SLOT.photoWidth * scale, pH = SLOT.photoHeight * scale;
+            const startY = SLOT.startY * scale, gap = SLOT.gap * scale;
+            photoImgs.forEach((p, i) => {
+                if (!p) return;
+                const yPos = startY + i*(pH+gap), xPos = (cnv.width-pW)/2;
+                const imgAspect = p.width/p.height, slotAspect = pW/pH;
+                let sw, sh, sx, sy;
+                if (imgAspect > slotAspect) { sh=p.height; sw=sh*slotAspect; sx=(p.width-sw)/2; sy=0; }
+                else { sw=p.width; sh=sw/slotAspect; sx=0; sy=(p.height-sh)/2; }
+                tCtx.drawImage(p, sx, sy, sw, sh, xPos, yPos, pW, pH);
+            });
+            if (thumbOverlay) tCtx.drawImage(thumbOverlay, 0, 0, cnv.width, cnv.height);
+        })();
     }
 };
 
