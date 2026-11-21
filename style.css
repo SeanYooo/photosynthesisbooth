@@ -140,11 +140,18 @@ body::before {
     justify-content: center;
 }
 
-video {
+/* Mirror ONLY the live camera preview (#video in the booth), not replay previews */
+#video {
     width: 100%;
     height: 100%;
     object-fit: cover;
     transform: scaleX(-1);
+}
+
+/* Replay preview videos should NOT be mirrored - they show the final composited strip */
+#replayPreview,
+#replayVideo {
+    transform: none;
 }
 
 .side-controls {

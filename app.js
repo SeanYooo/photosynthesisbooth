@@ -1235,20 +1235,72 @@ function showResultWithReplay(videoUrl) {
 }
 
 /**
- * Downloads the replay video from Cloudinary.
+ * Downloads the replay video from Cloudinary or local blob.
+ * Fetches the video as blob and triggers a download via object URL
+ * to work around cross-origin restrictions on <a download> with remote URLs.
  */
-function downloadReplayVideo() {
+async function downloadReplayVideo() {
+    const btn = document.getElementById('downloadVideoBtn');
     const url = window.replayVideoUrl;
     if (!url) return;
 
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'lock-in-replay.mp4';
-    a.target = '_blank';
-    a.rel = 'noopener';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'DOWNLOADING...';
+    }
+
+    try {
+        // First try: if it's a local blob URL, use it directly
+        if (url.startsWith('blob:')) {
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'photosynthesis-booth-replay.mp4';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            if (btn) {
+                btn.textContent = 'DOWNLOADED!';
+                setTimeout(() => {
+                    btn.disabled = false;
+                    btn.textContent = 'SAVE VIDEO';
+                }, 2000);
+            }
+            return;
+        }
+
+        // Second try: fetch remote URL (Cloudinary) as blob
+        const response = await fetch(url);
+        if (!response.ok) throw new Error('Failed to fetch video');
+
+        const blob = await response.blob();
+        const objectUrl = URL.createObjectURL(blob);
+
+        const a = document.createElement('a');
+        a.href = objectUrl;
+        a.download = 'photosynthesis-booth-replay.mp4';
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(objectUrl);
+
+        if (btn) {
+            btn.textContent = 'DOWNLOADED!';
+            setTimeout(() => {
+                btn.disabled = false;
+                btn.textContent = 'SAVE VIDEO';
+            }, 2000);
+        }
+    } catch (err) {
+        console.error('Download failed:', err);
+        if (btn) {
+            btn.textContent = 'ERROR - TRY AGAIN';
+            setTimeout(() => {
+                btn.disabled = false;
+                btn.textContent = 'SAVE VIDEO';
+            }, 3000);
+        }
+    }
 }
 
 function startNewSession() {
