@@ -872,6 +872,7 @@ async function generateReplayStrip(selectedIndices, frame) {
     // Master clock - 4 second cycle (120 frames at 30fps)
     const CLIP_DURATION_MS = REPLAY_DURATION_SECONDS * 1000; // 4000ms
     let lastLoopBoundary = 0;
+    const startTime = performance.now();
 
     recorder.start();
 
