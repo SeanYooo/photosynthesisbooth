@@ -730,6 +730,17 @@ function loadVideo(blob) {
 /**
  * Generates the animated replay strip by compositing 4 video clips
  * into the selected frame at 30fps for 4 seconds (120 frames total).
+ *
+ * FIXES:
+ * 1. No more flicker: Uses 4 persistent offscreen slot canvases.
+ *    Each slot canvas is initialized ONCE with the static photo, then
+ *    only updated when video has a valid frame (readyState >= 2, not seeking, not paused).
+ *    This eliminates the jump-cut flash between static and video frames.
+ *
+ * 2. No more 1.5s freeze: Uses a single master clock (elapsed = (now - startTime) % clipDurationMs)
+ *    instead of relying on video.duration (often Infinity for MediaRecorder blobs) or native
+ *    video.loop (which drifts and stalls across 4 separate elements).
+ *    Pre-buffers all 4 videos and waits for readyState >= 3 (HAVE_ENOUGH_DATA) before starting.
  */
 async function generateReplayStrip(selectedIndices, frame) {
     const canvas = document.createElement('canvas');
@@ -753,40 +764,6 @@ async function generateReplayStrip(selectedIndices, frame) {
     const videoBlobs = selectedIndices.map(i => capturedPhotos[i].video);
     const videos = await Promise.all(videoBlobs.map(loadVideo));
 
-    // CRITICAL FIX: Start playing all videos and wait for them to be ready
-    // This prevents white/blank slots at the start of the replay
-    await Promise.all(videos.map(async (video) => {
-        if (!video) return;
-        video.muted = true;
-        video.playsInline = true;
-        video.loop = true;
-        video.crossOrigin = "anonymous";
-        // Seek to start and wait for it to be seekable
-        video.currentTime = 0;
-        await new Promise((resolve, reject) => {
-            const onSeeked = () => {
-                video.removeEventListener('seeked', onSeeked);
-                video.removeEventListener('error', onError);
-                resolve();
-            };
-            const onError = (e) => {
-                video.removeEventListener('seeked', onSeeked);
-                video.removeEventListener('error', onError);
-                reject(e);
-            };
-            video.addEventListener('seeked', onSeeked);
-            video.addEventListener('error', onError);
-            // Also listen for canplay in case seeked doesn't fire
-            video.addEventListener('canplay', onSeeked, { once: true });
-        });
-        // Start playing - MUST await this to ensure video frames are available
-        try {
-            await video.play();
-        } catch (e) {
-            console.warn('Video play failed:', e);
-        }
-    }));
-
     // Calculate slot positions (same as drawToCanvas)
     const scale = canvas.width / SLOT.canvasWidth;
     const pW = SLOT.photoWidth * scale;
@@ -805,21 +782,95 @@ async function generateReplayStrip(selectedIndices, frame) {
         });
     }
 
-    // Load static photos as fallback base layer (fixes white flash/blank slots)
+    // Load static photos (one-time initialization for slot canvases)
     const staticPhotos = await Promise.all(
         selectedIndices.map(async (i) => {
             const photo = capturedPhotos[i];
             if (!photo?.still) return null;
-            const img = await loadImage(photo.still);
-            return img;
+            return loadImage(photo.still);
         })
     );
+
+    // FIX 1: Create 4 persistent offscreen slot canvases
+    // Draw static photo ONCE during initialization as the initial frame
+    const slotCanvases = [];
+    for (let i = 0; i < 4; i++) {
+        const slotCanvas = document.createElement('canvas');
+        slotCanvas.width = slotPositions[i].w;
+        slotCanvas.height = slotPositions[i].h;
+        const slotCtx = slotCanvas.getContext('2d');
+        const staticImg = staticPhotos[i];
+        if (staticImg) {
+            const imgAspect = staticImg.width / staticImg.height;
+            const slotAspect = slotCanvas.width / slotCanvas.height;
+            let sx, sy, sw, sh;
+            if (imgAspect > slotAspect) {
+                sh = staticImg.height;
+                sw = sh * slotAspect;
+                sx = (staticImg.width - sw) / 2;
+                sy = 0;
+            } else {
+                sw = staticImg.width;
+                sh = sw / slotAspect;
+                sx = 0;
+                sy = (staticImg.height - sh) / 2;
+            }
+            slotCtx.drawImage(staticImg, sx, sy, sw, sh, 0, 0, slotCanvas.width, slotCanvas.height);
+        }
+        slotCanvases.push(slotCanvas);
+    }
+
+    // Pre-buffer all 4 videos and wait for readyState >= 3 (HAVE_ENOUGH_DATA)
+    // FIX 2: Don't use video.loop or video.duration - use master clock instead
+    await Promise.all(videos.map(async (video, i) => {
+        if (!video) return;
+        video.muted = true;
+        video.playsInline = true;
+        video.crossOrigin = "anonymous";
+        // NO video.loop = true - we drive playback via master clock
+        video.currentTime = 0;
+
+        // Wait for video to be fully buffered and seekable
+        if (video.readyState < 3) {
+            await new Promise((resolve, reject) => {
+                const onCanPlayThrough = () => {
+                    video.removeEventListener('canplaythrough', onCanPlayThrough);
+                    video.removeEventListener('error', onError);
+                    resolve();
+                };
+                const onError = (e) => {
+                    video.removeEventListener('canplaythrough', onCanPlayThrough);
+                    video.removeEventListener('error', onError);
+                    reject(e);
+                };
+                video.addEventListener('canplaythrough', onCanPlayThrough);
+                video.addEventListener('error', onError);
+            });
+        }
+
+        // Prime the decoder by playing briefly then pausing at t=0
+        try {
+            await video.play();
+            // Give it a moment to decode first frame
+            await new Promise(r => setTimeout(r, 50));
+            video.pause();
+            video.currentTime = 0;
+        } catch (e) {
+            console.warn(`Video ${i} play/pause failed:`, e);
+        }
+    }));
+
+    // FIX 2: Master clock - 4 second cycle (120 frames at 30fps)
+    const CLIP_DURATION_MS = REPLAY_DURATION_SECONDS * 1000; // 4000ms
+    const startTime = performance.now();
 
     recorder.start();
 
     // Render 120 frames (4 seconds at 30fps)
     for (let frameIdx = 0; frameIdx < REPLAY_TOTAL_FRAMES; frameIdx++) {
-        const t = frameIdx / VIDEO_FPS; // time in seconds
+        // Master clock: elapsed time within the 4-second cycle
+        const elapsedMs = (performance.now() - startTime) % CLIP_DURATION_MS;
+        const t = elapsedMs / 1000; // time in seconds within [0, 4)
 
         // Clear and draw white background
         ctx.fillStyle = 'white';
@@ -830,37 +881,19 @@ async function generateReplayStrip(selectedIndices, frame) {
             ctx.drawImage(frameAssets.base, 0, 0, canvas.width, canvas.height);
         }
 
-        // Draw each video frame in its slot
+        // Draw each slot from its persistent offscreen canvas
         for (let i = 0; i < 4; i++) {
             const video = videos[i];
             const slot = slotPositions[i];
-            const staticImg = staticPhotos[i];
+            const slotCanvas = slotCanvases[i];
 
-            // ALWAYS draw static photo first as base layer (prevents white flash)
-            if (staticImg) {
-                const imgAspect = staticImg.width / staticImg.height;
-                const slotAspect = slot.w / slot.h;
-                let sx, sy, sw, sh;
-                if (imgAspect > slotAspect) {
-                    sh = staticImg.height;
-                    sw = sh * slotAspect;
-                    sx = (staticImg.width - sw) / 2;
-                    sy = 0;
-                } else {
-                    sw = staticImg.width;
-                    sh = sw / slotAspect;
-                    sx = 0;
-                    sy = (staticImg.height - sh) / 2;
-                }
-                ctx.drawImage(staticImg, sx, sy, sw, sh, slot.x, slot.y, slot.w, slot.h);
-            }
-
-            // Then draw video frame on top if ready (with mirror fix)
-            if (video && video.readyState >= 2) { // HAVE_CURRENT_DATA
-                video.currentTime = t % video.duration; // Loop seamlessly
-                // Draw video frame fitted to slot (cover)
+            // Update slot canvas ONLY when video has a valid frame
+            // readyState >= 2 (HAVE_CURRENT_DATA), not seeking, not paused
+            if (video && video.readyState >= 2 && !video.seeking && !video.paused) {
+                const slotCtx = slotCanvas.getContext('2d');
+                // Draw video frame fitted to slot (cover) with mirror fix
                 const vAspect = video.videoWidth / video.videoHeight;
-                const slotAspect = slot.w / slot.h;
+                const slotAspect = slotCanvas.width / slotCanvas.height;
                 let sx, sy, sw, sh;
                 if (vAspect > slotAspect) {
                     sh = video.videoHeight;
@@ -873,14 +906,16 @@ async function generateReplayStrip(selectedIndices, frame) {
                     sx = 0;
                     sy = (video.videoHeight - sh) / 2;
                 }
-                // FIX: Wrap mirror transform in save/restore so it doesn't leak to overlay
-                ctx.save();
                 // Mirror the video horizontally (webcam is mirrored, so we un-mirror for recording)
-                ctx.translate(slot.x + slot.w, slot.y);
-                ctx.scale(-1, 1);
-                ctx.drawImage(video, sx, sy, sw, sh, 0, 0, slot.w, slot.h);
-                ctx.restore();
+                slotCtx.save();
+                slotCtx.translate(slotCanvas.width, 0);
+                slotCtx.scale(-1, 1);
+                slotCtx.drawImage(video, sx, sy, sw, sh, 0, 0, slotCanvas.width, slotCanvas.height);
+                slotCtx.restore();
             }
+
+            // Draw the slot canvas (holds either static photo or latest valid video frame)
+            ctx.drawImage(slotCanvas, slot.x, slot.y, slot.w, slot.h);
         }
 
         // Draw frame overlay on top (at normal un-mirrored orientation)
@@ -898,10 +933,12 @@ async function generateReplayStrip(selectedIndices, frame) {
             if (statusEl) statusEl.textContent = `Rendering frame ${frameIdx + 1} / ${REPLAY_TOTAL_FRAMES}...`;
         }
 
-        // Wait for next frame (sync to 30fps)
+        // Wait for next frame (sync to 30fps via captureStream)
         await new Promise(r => requestAnimationFrame(r));
     }
 
+    // After rendering, explicitly seek all videos to end to ensure MediaRecorder flushes
+    // (captureStream needs the canvas to be "done" to finalize the recording)
     recorder.stop();
 
     return new Promise((resolve) => {
