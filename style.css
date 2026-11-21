@@ -482,11 +482,21 @@ button.secondary {
 /* Replay Preview on Result Screen */
 #replayPreviewContainer {
     animation: fadeIn 0.5s ease-out;
+    display: flex !important;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
 }
 
 #replayPreviewContainer .tagline {
     margin-bottom: 12px;
     font-size: 13px;
+}
+
+#replayPreview {
+    display: block;
+    margin: 0 auto;
 }
 
 /* QR Code Section */

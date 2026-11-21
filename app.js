@@ -753,6 +753,40 @@ async function generateReplayStrip(selectedIndices, frame) {
     const videoBlobs = selectedIndices.map(i => capturedPhotos[i].video);
     const videos = await Promise.all(videoBlobs.map(loadVideo));
 
+    // CRITICAL FIX: Start playing all videos and wait for them to be ready
+    // This prevents white/blank slots at the start of the replay
+    await Promise.all(videos.map(async (video) => {
+        if (!video) return;
+        video.muted = true;
+        video.playsInline = true;
+        video.loop = true;
+        video.crossOrigin = "anonymous";
+        // Seek to start and wait for it to be seekable
+        video.currentTime = 0;
+        await new Promise((resolve, reject) => {
+            const onSeeked = () => {
+                video.removeEventListener('seeked', onSeeked);
+                video.removeEventListener('error', onError);
+                resolve();
+            };
+            const onError = (e) => {
+                video.removeEventListener('seeked', onSeeked);
+                video.removeEventListener('error', onError);
+                reject(e);
+            };
+            video.addEventListener('seeked', onSeeked);
+            video.addEventListener('error', onError);
+            // Also listen for canplay in case seeked doesn't fire
+            video.addEventListener('canplay', onSeeked, { once: true });
+        });
+        // Start playing - MUST await this to ensure video frames are available
+        try {
+            await video.play();
+        } catch (e) {
+            console.warn('Video play failed:', e);
+        }
+    }));
+
     // Calculate slot positions (same as drawToCanvas)
     const scale = canvas.width / SLOT.canvasWidth;
     const pW = SLOT.photoWidth * scale;
@@ -770,6 +804,16 @@ async function generateReplayStrip(selectedIndices, frame) {
             h: pH
         });
     }
+
+    // Load static photos as fallback base layer (fixes white flash/blank slots)
+    const staticPhotos = await Promise.all(
+        selectedIndices.map(async (i) => {
+            const photo = capturedPhotos[i];
+            if (!photo?.still) return null;
+            const img = await loadImage(photo.still);
+            return img;
+        })
+    );
 
     recorder.start();
 
@@ -790,8 +834,30 @@ async function generateReplayStrip(selectedIndices, frame) {
         for (let i = 0; i < 4; i++) {
             const video = videos[i];
             const slot = slotPositions[i];
+            const staticImg = staticPhotos[i];
+
+            // ALWAYS draw static photo first as base layer (prevents white flash)
+            if (staticImg) {
+                const imgAspect = staticImg.width / staticImg.height;
+                const slotAspect = slot.w / slot.h;
+                let sx, sy, sw, sh;
+                if (imgAspect > slotAspect) {
+                    sh = staticImg.height;
+                    sw = sh * slotAspect;
+                    sx = (staticImg.width - sw) / 2;
+                    sy = 0;
+                } else {
+                    sw = staticImg.width;
+                    sh = sw / slotAspect;
+                    sx = 0;
+                    sy = (staticImg.height - sh) / 2;
+                }
+                ctx.drawImage(staticImg, sx, sy, sw, sh, slot.x, slot.y, slot.w, slot.h);
+            }
+
+            // Then draw video frame on top if ready (with mirror fix)
             if (video && video.readyState >= 2) { // HAVE_CURRENT_DATA
-                video.currentTime = t;
+                video.currentTime = t % video.duration; // Loop seamlessly
                 // Draw video frame fitted to slot (cover)
                 const vAspect = video.videoWidth / video.videoHeight;
                 const slotAspect = slot.w / slot.h;
@@ -807,12 +873,19 @@ async function generateReplayStrip(selectedIndices, frame) {
                     sx = 0;
                     sy = (video.videoHeight - sh) / 2;
                 }
-                ctx.drawImage(video, sx, sy, sw, sh, slot.x, slot.y, slot.w, slot.h);
+                // FIX: Wrap mirror transform in save/restore so it doesn't leak to overlay
+                ctx.save();
+                // Mirror the video horizontally (webcam is mirrored, so we un-mirror for recording)
+                ctx.translate(slot.x + slot.w, slot.y);
+                ctx.scale(-1, 1);
+                ctx.drawImage(video, sx, sy, sw, sh, 0, 0, slot.w, slot.h);
+                ctx.restore();
             }
         }
 
-        // Draw frame overlay on top
+        // Draw frame overlay on top (at normal un-mirrored orientation)
         if (frameAssets.overlay) {
+            ctx.setTransform(1, 0, 0, 1, 0, 0); // Ensure no transform leakage
             ctx.drawImage(frameAssets.overlay, 0, 0, canvas.width, canvas.height);
         }
 
@@ -878,6 +951,7 @@ async function uploadToCloudinary(videoBlob) {
 
 /**
  * Renders QR code to canvas using qrcodejs.
+ * Note: qrcodejs replaces the canvas element, so we need to re-get it after.
  */
 function renderQRCode(url) {
     const canvas = document.getElementById('qrCanvas');
@@ -890,7 +964,12 @@ function renderQRCode(url) {
 
     // Use qrcodejs if available
     if (typeof QRCode !== 'undefined') {
-        new QRCode(canvas, {
+        // qrcodejs replaces the canvas element, so create a temporary div
+        const tempDiv = document.createElement('div');
+        canvas.parentNode.insertBefore(tempDiv, canvas);
+        canvas.style.display = 'none';
+
+        new QRCode(tempDiv, {
             text: url,
             width: 512,
             height: 512,
@@ -898,6 +977,16 @@ function renderQRCode(url) {
             colorDark: '#062014',
             colorLight: '#ffffff'
         });
+
+        // qrcodejs creates a canvas inside the div, copy it to our canvas
+        setTimeout(() => {
+            const qrCanvas = tempDiv.querySelector('canvas');
+            if (qrCanvas) {
+                ctx.drawImage(qrCanvas, 0, 0, canvas.width, canvas.height);
+            }
+            tempDiv.remove();
+            canvas.style.display = 'block';
+        }, 0);
     } else {
         // Fallback: draw placeholder text
         ctx.fillStyle = '#062014';
@@ -930,7 +1019,17 @@ async function processReplayStrip() {
 
         // Upload to Cloudinary
         if (statusEl) statusEl.textContent = 'Uploading to Cloudinary...';
-        const cloudinaryUrl = await uploadToCloudinary(videoBlob);
+        let cloudinaryUrl;
+        try {
+            cloudinaryUrl = await uploadToCloudinary(videoBlob);
+        } catch (err) {
+            console.error('Cloudinary upload failed:', err);
+            if (statusEl) statusEl.textContent = `Upload failed: ${err.message}`;
+            // Fall back to local object URL for QR/replay
+            cloudinaryUrl = URL.createObjectURL(videoBlob);
+            createdObjectUrls.push(cloudinaryUrl);
+            if (statusEl) statusEl.textContent = 'Using local link (Cloudinary upload failed)';
+        }
 
         // Store URL for download button
         window.replayVideoUrl = cloudinaryUrl;
@@ -960,7 +1059,8 @@ function showResultWithReplay(videoUrl) {
     }
 
     // Generate and show QR code
-    const replayPageUrl = `https://seanyooo.github.io/photosynthesisbooth/replay.html?replay=${encodeURIComponent(videoUrl)}`;
+    // Encoded as: https://seanyooo.github.io/photosynthesisbooth/?replay=<encoded_cloudinary_url>
+    const replayPageUrl = `https://seanyooo.github.io/photosynthesisbooth/?replay=${encodeURIComponent(videoUrl)}`;
     renderQRCode(replayPageUrl);
 
     const qrSection = document.getElementById('qrSection');
